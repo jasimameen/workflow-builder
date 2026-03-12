@@ -40,38 +40,115 @@ const edge = (id: string, source: string, target: string, label?: string, color?
 });
 
 // ── Demo workflow: Invoice Processor ──────────────────────────────────────────
+// This demo shows how variables flow between nodes.
+// Each node clearly outputs variables (shown as chips) that downstream
+// nodes can reference using {{variableName}} syntax in their fields.
 const DEMO_NODES: WFNode[] = [
   {
-    id: 'd1', type: 'workflowNode', position: { x: 320, y: 40 },
-    data: { nodeConfig: NODE_LIBRARY.find(n => n.id === 'trigger-email')!, label: 'Email Received', description: 'Watch inbox for invoices', fields: { host: 'imap.gmail.com', folder: 'INBOX', filter: 'Invoice', markRead: true } },
+    // Outputs: email_subject, email_body, email_sender, email_attachments, email_date
+    id: 'd1', type: 'workflowNode', position: { x: 340, y: 40 },
+    data: {
+      nodeConfig: NODE_LIBRARY.find(n => n.id === 'trigger-email')!,
+      label: 'Email Received',
+      description: 'Watch inbox for invoices with "Invoice" in subject',
+      fields: { host: 'imap.gmail.com', folder: 'INBOX', filter: 'Invoice', markRead: true },
+    },
   },
   {
-    id: 'd2', type: 'workflowNode', position: { x: 320, y: 180 },
-    data: { nodeConfig: NODE_LIBRARY.find(n => n.id === 'ai-email-agent')!, label: 'Email AI Agent', description: 'Extract invoice details with AI', fields: { provider: 'Anthropic (Claude)', model: 'claude-sonnet-4-6', tools: 'extract only', outputVar: 'invoice_data', autoreply: false, agentInstructions: 'Extract invoice number, vendor, amount, due date, line items from the email.' } },
+    // INPUT: email_body, email_subject, email_sender (from d1)
+    // OUTPUT: invoice_data (json) — contains vendor, amount, invoice_no, due_date, line_items
+    id: 'd2', type: 'workflowNode', position: { x: 340, y: 200 },
+    data: {
+      nodeConfig: NODE_LIBRARY.find(n => n.id === 'ai-email-agent')!,
+      label: 'Extract Invoice Data',
+      description: 'AI reads {{email_body}} and extracts structured invoice fields',
+      fields: {
+        provider: 'Anthropic (Claude)',
+        model: 'claude-sonnet-4-6',
+        tools: 'extract only',
+        outputVar: 'invoice_data',
+        autoreply: false,
+        agentInstructions: 'Extract from {{email_body}} sent by {{email_sender}}: invoice_no, vendor, amount (number), due_date, line_items (list). Return as JSON.',
+      },
+    },
   },
   {
-    id: 'd3', type: 'workflowNode', position: { x: 320, y: 330 },
-    data: { nodeConfig: NODE_LIBRARY.find(n => n.id === 'data-read-excel')!, label: 'Load Tracker', description: 'Read existing invoice tracker', fields: { path: 'invoices.xlsx', sheet: 'Tracker', header: 0 } },
+    // INPUT: invoice_data (from d2)
+    // OUTPUT: df, df_rows, df_cols
+    id: 'd3', type: 'workflowNode', position: { x: 340, y: 370 },
+    data: {
+      nodeConfig: NODE_LIBRARY.find(n => n.id === 'data-read-excel')!,
+      label: 'Load Invoice Tracker',
+      description: 'Read existing tracker to check for duplicates',
+      fields: { path: 'invoices.xlsx', sheet: 'Tracker', header: 0 },
+    },
   },
   {
-    id: 'd4', type: 'workflowNode', position: { x: 320, y: 470 },
-    data: { nodeConfig: NODE_LIBRARY.find(n => n.id === 'flow-if-else')!, label: 'Amount Check', description: 'Is invoice > 10,000?', fields: { variable: 'invoice_data["amount"]', operator: '>', value: '10000' } },
+    // INPUT: invoice_data (from d2) — checks invoice_data["amount"]
+    // OUTPUT: condition_result (boolean)  — TRUE path and FALSE path
+    id: 'd4', type: 'workflowNode', position: { x: 340, y: 530 },
+    data: {
+      nodeConfig: NODE_LIBRARY.find(n => n.id === 'flow-if-else')!,
+      label: 'High-Value Check',
+      description: 'Branch: is invoice_data["amount"] > 10,000 SAR?',
+      fields: {
+        variable: 'invoice_data["amount"]',
+        operator: '>',
+        value: '10000',
+      },
+    },
   },
   {
-    id: 'd5', type: 'workflowNode', position: { x: 100, y: 630 },
-    data: { nodeConfig: NODE_LIBRARY.find(n => n.id === 'send-email')!, label: 'Escalate to CFO', description: 'High-value invoice alert', fields: { to: 'cfo@company.com', subject: 'High Value Invoice: {amount}', body: 'Invoice from {vendor} for {amount} requires approval.' } },
+    // INPUT: invoice_data (from d2) — used in subject and body via {{variable}}
+    // TRUE path: amounts over 10,000 go to CFO
+    id: 'd5', type: 'workflowNode', position: { x: 80, y: 710 },
+    data: {
+      nodeConfig: NODE_LIBRARY.find(n => n.id === 'send-email')!,
+      label: 'Escalate to CFO',
+      description: 'High-value invoice → CFO approval required',
+      fields: {
+        to: 'cfo@company.com',
+        subject: '⚠️ Approval Required: Invoice from {{invoice_data["vendor"]}}',
+        body: 'Hi CFO,\n\nInvoice #{{invoice_data["invoice_no"]}} from {{invoice_data["vendor"]}} for SAR {{invoice_data["amount"]}} requires your approval.\n\nDue Date: {{invoice_data["due_date"]}}\n\nPlease review and approve.',
+        smtpHost: 'smtp.gmail.com',
+        smtpPort: 587,
+      },
+    },
   },
   {
-    id: 'd6', type: 'workflowNode', position: { x: 540, y: 630 },
-    data: { nodeConfig: NODE_LIBRARY.find(n => n.id === 'data-write-excel')!, label: 'Update Tracker', description: 'Append to invoice tracker', fields: { path: 'invoices.xlsx', sheet: 'Tracker', mode: 'append', autofit: true } },
+    // INPUT: invoice_data (from d2), df (from d3) — appends new invoice row
+    // FALSE path: amounts under 10,000 auto-approved
+    id: 'd6', type: 'workflowNode', position: { x: 600, y: 710 },
+    data: {
+      nodeConfig: NODE_LIBRARY.find(n => n.id === 'data-write-excel')!,
+      label: 'Update Invoice Tracker',
+      description: 'Append {{invoice_data["invoice_no"]}} row to tracker (df)',
+      fields: { path: 'invoices.xlsx', sheet: 'Tracker', mode: 'append', autofit: true },
+    },
   },
   {
-    id: 'd7', type: 'workflowNode', position: { x: 320, y: 790 },
-    data: { nodeConfig: NODE_LIBRARY.find(n => n.id === 'send-slack')!, label: 'Notify Finance Team', description: 'Post to #finance channel', fields: { channel: '#finance', message: '✅ Invoice processed: {vendor} — {amount}' } },
+    // INPUT: invoice_data (from d2), output_path (from d6)
+    id: 'd7', type: 'workflowNode', position: { x: 340, y: 880 },
+    data: {
+      nodeConfig: NODE_LIBRARY.find(n => n.id === 'send-slack')!,
+      label: 'Notify Finance Team',
+      description: 'Post summary to #finance using invoice_data variables',
+      fields: {
+        channel: '#finance',
+        message: '✅ Invoice processed!\n• Vendor: {{invoice_data["vendor"]}}\n• Amount: SAR {{invoice_data["amount"]}}\n• Invoice #: {{invoice_data["invoice_no"]}}\n• Due: {{invoice_data["due_date"]}}\n• Tracker: {{output_path}}',
+        username: 'Invoice Bot',
+        iconEmoji: ':receipt:',
+      },
+    },
   },
   {
-    id: 'd8', type: 'workflowNode', position: { x: 320, y: 930 },
-    data: { nodeConfig: NODE_LIBRARY.find(n => n.id === 'end-success')!, label: 'Done', description: 'Workflow complete', fields: { message: 'Invoice processed and team notified.' } },
+    id: 'd8', type: 'workflowNode', position: { x: 340, y: 1040 },
+    data: {
+      nodeConfig: NODE_LIBRARY.find(n => n.id === 'end-success')!,
+      label: 'Done',
+      description: 'All steps complete. {{df_rows}} invoices in tracker.',
+      fields: { message: 'Invoice processed successfully. Tracker has {{df_rows}} rows.', returnVar: 'invoice_data' },
+    },
   },
 ];
 
@@ -312,6 +389,7 @@ export default function WorkflowCanvas() {
               onUpdateNode={updateNode}
               onDeleteNode={deleteNode}
               allNodes={nodes}
+              edges={edges}
               savedVariables={savedVariables}
               onSaveVariable={addSavedVariable}
             />

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback } from 'react';
-import { Node } from '@xyflow/react';
+import { Node, Edge } from '@xyflow/react';
 import {
   WorkflowNodeData,
   FieldConfig,
@@ -11,11 +11,13 @@ import {
   FIELD_TYPE_COLORS,
 } from '../lib/types';
 import { NodeIcon } from '../lib/icons';
+import { getAvailableVariables, computeNodeOutputs, varTypeColor, AvailableVariable, ResolvedOutput } from '../lib/nodeIO';
 import VariablePicker from './VariablePicker';
 import InteractiveOutputViewer from './InteractiveOutputViewer';
 import {
   Plus, Trash2, ChevronDown, ChevronRight, Play, Copy, Check,
   AlertCircle, CheckCircle, Clock, Loader2, Eye, EyeOff, Key,
+  ArrowDown, ArrowUp, Zap,
 } from 'lucide-react';
 
 interface PropertiesPanelProps {
@@ -23,8 +25,177 @@ interface PropertiesPanelProps {
   onUpdateNode: (id: string, updates: Partial<WorkflowNodeData>) => void;
   onDeleteNode: (id: string) => void;
   allNodes: Node<WorkflowNodeData>[];
+  edges: Edge[];
   savedVariables: SavedVariable[];
   onSaveVariable: (v: SavedVariable) => void;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  I/O Contract Section
+// ─────────────────────────────────────────────────────────────────────────────
+
+function IOContractSection({
+  upstreamVars,
+  ownOutputs,
+  nodeColor,
+  nodeBorder,
+}: {
+  upstreamVars: AvailableVariable[];
+  ownOutputs: ResolvedOutput[];
+  nodeColor: string;
+  nodeBorder: string;
+}) {
+  const [open, setOpen] = useState(true);
+  const [copiedVar, setCopiedVar] = useState<string | null>(null);
+
+  const copyVar = (key: string) => {
+    navigator.clipboard.writeText(`{{${key}}}`);
+    setCopiedVar(key);
+    setTimeout(() => setCopiedVar(null), 1500);
+  };
+
+  return (
+    <div className="border border-gray-200 rounded-xl overflow-hidden mb-3">
+      {/* Header */}
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 bg-gray-50 hover:bg-gray-100 transition-colors"
+      >
+        <div className="flex items-center gap-1.5">
+          {open ? <ChevronDown size={11} className="text-gray-500" /> : <ChevronRight size={11} className="text-gray-500" />}
+          <Zap size={11} style={{ color: nodeBorder }} />
+          <span className="text-[10px] font-bold text-gray-700 uppercase tracking-wider">I/O Contract</span>
+          <span className="text-[9px] text-gray-400">— what flows in &amp; out</span>
+        </div>
+        <div className="flex items-center gap-2 text-[8px] text-gray-400">
+          <span className="flex items-center gap-0.5"><ArrowDown size={8} className="text-blue-400" />{upstreamVars.length} in</span>
+          <span className="flex items-center gap-0.5"><ArrowUp size={8} className="text-green-500" />{ownOutputs.length} out</span>
+        </div>
+      </button>
+
+      {open && (
+        <div className="divide-y divide-gray-100">
+          {/* ── INPUTS: Variables available from upstream ── */}
+          <div className="px-3 py-2.5">
+            <div className="flex items-center gap-1.5 mb-2">
+              <ArrowDown size={10} className="text-blue-400" />
+              <span className="text-[9px] font-bold uppercase tracking-wider text-blue-600">
+                Available inputs from upstream
+              </span>
+              {upstreamVars.length === 0 && (
+                <span className="text-[9px] text-gray-400 italic">— no upstream nodes connected</span>
+              )}
+            </div>
+            {upstreamVars.length > 0 ? (
+              <div className="space-y-1">
+                {upstreamVars.map((v) => {
+                  const c = varTypeColor(v.type);
+                  return (
+                    <div
+                      key={`${v.nodeId}-${v.key}`}
+                      className="flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg group"
+                      style={{ background: `${c.bg}`, border: `1px solid ${c.border}` }}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span style={{ color: c.dot, fontSize: 7, flexShrink: 0 }}>●</span>
+                        <code
+                          className="text-[10px] font-mono font-bold truncate"
+                          style={{ color: c.text }}
+                        >
+                          {`{{${v.key}}}`}
+                        </code>
+                        <span className="text-[9px] px-1 py-0.5 rounded text-gray-500 bg-white border border-gray-200 flex-shrink-0">
+                          {v.type}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <span className="text-[8px] text-gray-400 truncate max-w-[70px]" title={v.nodeName}>
+                          {v.nodeName}
+                        </span>
+                        <button
+                          onClick={() => copyVar(v.key)}
+                          className="opacity-0 group-hover:opacity-100 text-[8px] px-1 py-0.5 rounded bg-white border border-gray-200 text-gray-500 hover:text-gray-700 transition-all flex items-center gap-0.5"
+                          title={`Copy {{${v.key}}}`}
+                        >
+                          {copiedVar === v.key ? <Check size={8} className="text-green-500" /> : <Copy size={8} />}
+                          {copiedVar === v.key ? 'Copied!' : 'Copy'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-[9px] text-gray-400 italic px-1">
+                Connect nodes before this one to see available variables here.
+              </div>
+            )}
+          </div>
+
+          {/* ── OUTPUTS: What this node produces ── */}
+          <div className="px-3 py-2.5">
+            <div className="flex items-center gap-1.5 mb-2">
+              <ArrowUp size={10} className="text-green-500" />
+              <span className="text-[9px] font-bold uppercase tracking-wider text-green-700">
+                This node&apos;s outputs
+              </span>
+              {ownOutputs.length === 0 && (
+                <span className="text-[9px] text-gray-400 italic">— no outputs (control-flow node)</span>
+              )}
+            </div>
+            {ownOutputs.length > 0 ? (
+              <div className="space-y-1">
+                {ownOutputs.map((o) => {
+                  const c = varTypeColor(o.type);
+                  return (
+                    <div
+                      key={o.key}
+                      className="flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg group"
+                      style={{ background: `${c.bg}`, border: `1px solid ${c.border}` }}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                        <span style={{ color: c.dot, fontSize: 7, flexShrink: 0 }}>▶</span>
+                        <code
+                          className="text-[10px] font-mono font-bold"
+                          style={{ color: c.text }}
+                        >
+                          {o.key}
+                        </code>
+                        <span className="text-[9px] px-1 py-0.5 rounded text-gray-500 bg-white border border-gray-200 flex-shrink-0">
+                          {o.type}
+                        </span>
+                        {o.source === 'custom' && (
+                          <span className="text-[7px] text-orange-500 border border-orange-200 bg-orange-50 px-1 rounded">custom</span>
+                        )}
+                      </div>
+                      {o.label && (
+                        <span className="text-[8px] text-gray-400 italic truncate max-w-[90px]" title={o.label}>
+                          {o.label}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-[9px] text-gray-400 italic px-1">
+                This node produces no variables — it is used for control flow only.
+              </div>
+            )}
+          </div>
+
+          {/* ── Usage hint ── */}
+          {upstreamVars.length > 0 && (
+            <div className="px-3 py-2 bg-blue-50">
+              <p className="text-[9px] text-blue-600 leading-relaxed">
+                💡 Type <code className="font-mono bg-blue-100 px-0.5 rounded">{`{{variableName}}`}</code> in any text field to reference an upstream variable. Click <strong>Copy</strong> on any variable above to insert it.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -56,6 +227,7 @@ export default function PropertiesPanel({
   onUpdateNode,
   onDeleteNode,
   allNodes,
+  edges,
   savedVariables,
   onSaveVariable,
 }: PropertiesPanelProps) {
@@ -281,6 +453,10 @@ export default function PropertiesPanel({
 
   // (inputRefs and makeInsertHandler are declared above the early-return, honouring Rules of Hooks)
 
+  // Compute I/O contract
+  const upstreamVars = getAvailableVariables(selectedNode.id, allNodes, edges);
+  const ownOutputs = computeNodeOutputs(nodeConfig, fields, customFields);
+
   // Decide if a node needs an API key in test
   const needsApiKey = nodeConfig.type === 'ai';
   const isHttpNode = nodeConfig.id === 'external-http';
@@ -346,6 +522,15 @@ export default function PropertiesPanel({
       {/* ── Config Tab ────────────────────────────────────────────────── */}
       {activeTab === 'config' && (
         <div className="flex-1 overflow-y-auto px-3.5 py-3 space-y-3">
+
+          {/* ── I/O Contract ─────────────────────────────────────────── */}
+          <IOContractSection
+            upstreamVars={upstreamVars}
+            ownOutputs={ownOutputs}
+            nodeColor={nodeConfig.color}
+            nodeBorder={nodeConfig.borderColor}
+          />
+
           {/* Display name */}
           <FieldRow
             fieldKey="display_label"

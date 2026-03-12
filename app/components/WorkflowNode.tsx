@@ -4,12 +4,19 @@ import { memo } from 'react';
 import { Handle, Position, type NodeProps, type Node } from '@xyflow/react';
 import { WorkflowNodeData, TestStatus } from '../lib/types';
 import { NodeIcon } from '../lib/icons';
+import { computeNodeOutputs, varTypeColor } from '../lib/nodeIO';
 
 type WFNodeProps = NodeProps<Node<WorkflowNodeData>>;
 
 const CATEGORY_LABELS: Record<string, string> = {
   trigger: 'Trigger', flow: 'Flow', data: 'Data', transform: 'Transform',
   send: 'Send', external: 'External', ai: 'AI', code: 'Code', end: 'End',
+};
+
+// Short display labels for output types
+const TYPE_ABBREV: Record<string, string> = {
+  dataframe: 'df', string: 'str', number: 'num', boolean: 'bool',
+  json: 'json', list: 'list', email: 'email', any: 'any',
 };
 
 const WorkflowNode = memo(({ data, selected }: WFNodeProps) => {
@@ -32,6 +39,13 @@ const WorkflowNode = memo(({ data, selected }: WFNodeProps) => {
   const hasCustomFields = (nodeData.customFields || []).length > 0;
   const testStatus: TestStatus | undefined = nodeData.testState?.status;
 
+  // Resolved outputs for this node
+  const resolvedOutputs = computeNodeOutputs(
+    nodeConfig,
+    nodeData.fields,
+    nodeData.customFields,
+  );
+
   const handleStyle = {
     background: nodeConfig.borderColor,
     borderColor: 'white',
@@ -52,9 +66,10 @@ const WorkflowNode = memo(({ data, selected }: WFNodeProps) => {
           : '0 2px 8px rgba(0,0,0,0.07)',
         transform: selected ? 'scale(1.02)' : 'scale(1)',
         transition: 'all 0.15s ease',
-        minWidth: isSwitch ? Math.max(200, switchCases.length * 72) : 185,
-        maxWidth: 260,
+        minWidth: isSwitch ? Math.max(200, switchCases.length * 72) : 190,
+        maxWidth: 265,
         borderRadius: 12,
+        overflow: 'hidden',
       }}
       className="cursor-pointer select-none"
     >
@@ -66,12 +81,12 @@ const WorkflowNode = memo(({ data, selected }: WFNodeProps) => {
       {/* AI gradient top line */}
       {isAI && (
         <div
-          className="h-0.5 rounded-t-xl"
+          className="h-0.5"
           style={{ background: `linear-gradient(90deg, ${nodeConfig.borderColor}aa, transparent, ${nodeConfig.borderColor}aa)` }}
         />
       )}
 
-      <div className="px-3 pt-2.5 pb-2.5">
+      <div className="px-3 pt-2.5 pb-2">
         {/* Badge row */}
         <div className="flex items-center justify-between mb-1.5 gap-1">
           <div className="flex items-center gap-1 flex-wrap">
@@ -156,6 +171,38 @@ const WorkflowNode = memo(({ data, selected }: WFNodeProps) => {
           </div>
         )}
       </div>
+
+      {/* ── OUTPUT VARIABLES STRIP ──────────────────────────────────────── */}
+      {resolvedOutputs.length > 0 && (
+        <div
+          className="px-3 pt-1.5 pb-2"
+          style={{ borderTop: `1px dashed ${nodeConfig.borderColor}40`, background: `${nodeConfig.borderColor}08` }}
+        >
+          <div className="text-[8px] font-bold uppercase tracking-widest mb-1" style={{ color: nodeConfig.color, opacity: 0.5 }}>
+            outputs
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {resolvedOutputs.slice(0, 4).map((o) => {
+              const c = varTypeColor(o.type);
+              return (
+                <span
+                  key={o.key}
+                  title={`${o.label}${o.source === 'custom' ? ' (custom field)' : ''}`}
+                  className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold"
+                  style={{ background: c.bg, color: c.text, border: `1px solid ${c.border}` }}
+                >
+                  <span style={{ color: c.dot, fontSize: 7 }}>●</span>
+                  {o.key}
+                  <span className="opacity-50 font-normal ml-0.5">{TYPE_ABBREV[o.type] ?? o.type}</span>
+                </span>
+              );
+            })}
+            {resolvedOutputs.length > 4 && (
+              <span className="text-[8px] text-gray-400 self-center">+{resolvedOutputs.length - 4}</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Single bottom output */}
       {!isEnd && !isSwitch && !isCondition && !hasTryCatch && (
