@@ -406,15 +406,64 @@ ${i}print(f"🗑️  Duplicates removed: {_before - len(df)} rows removed, {len(
     }
 
     case 'data-vlookup': {
-      const rightFile = f(d, 'rightFile', 'lookup.xlsx');
-      const lk = f(d, 'leftKey', 'ID');
-      const rk = f(d, 'rightKey', 'ID');
-      const how = f(d, 'how', 'left');
-      const suffix = f(d, 'suffix', '_lookup');
-      return `${customBlock}${i}# ── VLOOKUP / Merge ────────────────────────────────────────
-${i}df_lookup = pd.read_excel("${rightFile}")
-${i}df = pd.merge(df, df_lookup, left_on="${lk}", right_on="${rk}", how="${how}", suffixes=("", "${suffix}"))
-${i}print(f"🔗 Merged: {len(df)} rows after {how} join on '{lk}'")
+      const lookupValue  = f(d, 'lookupValue',  '');
+      const lookupFile   = f(d, 'lookupFile',   'lookup.xlsx');
+      const lookupSheet  = f(d, 'lookupSheet',  'Sheet1');
+      const searchCol    = f(d, 'searchColumn', 'A');
+      const returnCol    = f(d, 'returnColumn', 'B');
+      const matchType    = f(d, 'matchType',    'Exact (FALSE)');
+      const ifNotFound   = f(d, 'ifNotFound',   'Return empty string');
+      const applyToCol   = f(d, 'applyToColumn','');
+      const outputVar    = f(d, 'outputVar',    'vlookup_result');
+      const isExact      = matchType.startsWith('Exact');
+      const isXlsx       = lookupFile.endsWith('.xlsx') || lookupFile.endsWith('.xls');
+      const colIsLetter  = (c: string) => /^[A-Za-z]$/.test(c.trim());
+      const letterToIdx  = (c: string) => c.trim().toUpperCase().charCodeAt(0) - 65;
+      const resolveCol   = (c: string) =>
+        colIsLetter(c) ? `_tbl.columns[${letterToIdx(c)}]`
+        : /^\d+$/.test(c.trim()) ? `_tbl.columns[${Number(c.trim()) - 1}]`
+        : `"${c}"`;
+      const searchColPy  = resolveCol(searchCol);
+      const returnColPy  = resolveCol(returnCol);
+      const lookupPy     = lookupValue.startsWith('{') && lookupValue.endsWith('}')
+        ? lookupValue.slice(1, -1)
+        : lookupValue === '' ? '_lookup_val' : `"${lookupValue}"`;
+      const readCmd = isXlsx
+        ? `pd.read_excel("${lookupFile}", sheet_name="${lookupSheet}")`
+        : `pd.read_csv("${lookupFile}")`;
+      const notFoundMap: Record<string,string> = {
+        'Return empty string': '""', 'Return #N/A': '"#N/A"',
+        'Return 0': '0', 'Raise error': 'None',
+      };
+      const notFoundVal  = notFoundMap[ifNotFound] || '""';
+      const raiseOnMiss  = ifNotFound === 'Raise error';
+      if (applyToCol) {
+        return `${customBlock}${i}# ── VLOOKUP (apply to column) ──────────────────────────────
+${i}_tbl = ${readCmd}
+${i}_search_col = ${searchColPy}
+${i}_return_col = ${returnColPy}
+${i}_lookup_map = dict(zip(_tbl[_search_col].values, _tbl[_return_col].values))
+${i}df["${outputVar}"] = df["${applyToCol}"].map(_lookup_map)${ifNotFound !== 'Raise error' ? `.fillna(${notFoundVal})` : ''}
+${i}print(f"🔍 VLOOKUP '${applyToCol}' → '${outputVar}': {df['${outputVar}'].notna().sum()} matched of {len(df)}")
+`;
+      }
+      const approxBlock = `_tbl_s = _tbl.sort_values(_search_col)
+${i}_idx   = _tbl_s[_search_col].searchsorted(_lookup_val, side="right") - 1
+${i}_match = _tbl_s.iloc[[_idx]] if 0 <= _idx < len(_tbl_s) else pd.DataFrame()`;
+      return `${customBlock}${i}# ── VLOOKUP (single value) ─────────────────────────────────
+${i}_tbl        = ${readCmd}
+${i}_search_col = ${searchColPy}
+${i}_return_col = ${returnColPy}
+${i}_lookup_val = ${lookupPy}
+${i}${isExact ? `_match = _tbl[_tbl[_search_col] == _lookup_val]` : approxBlock}
+${i}if not _match.empty:
+${i}    ${outputVar} = _match.iloc[0][_return_col]
+${i}    print(f"🔍 VLOOKUP: {_lookup_val!r} → {${outputVar}!r}")
+${i}else:
+${raiseOnMiss
+  ? `${i}    raise ValueError(f"VLOOKUP: value not found in column '${searchCol}'")`
+  : `${i}    ${outputVar} = ${notFoundVal}\n${i}    print(f"⚠️  VLOOKUP: not found — returning ${notFoundVal}")`
+}
 `;
     }
 

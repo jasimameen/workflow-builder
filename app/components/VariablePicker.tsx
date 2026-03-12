@@ -49,7 +49,10 @@ export default function VariablePicker({ allNodes, savedVariables, onInsert }: V
   }, [onInsert]);
 
   // Collect custom fields from all nodes
-  const allCustomVars: Array<{ key: string; label: string; type: string; nodeName: string }> = [];
+  const allCustomVars: Array<{
+    key: string; label: string; type: string; nodeName: string;
+    value?: string | number | boolean; sourcePath?: string;
+  }> = [];
   for (const node of allNodes) {
     for (const cf of node.data.customFields || []) {
       if (!cf.key) continue;
@@ -58,6 +61,8 @@ export default function VariablePicker({ allNodes, savedVariables, onInsert }: V
         label: cf.label || cf.key,
         type: cf.type,
         nodeName: node.data.label || node.data.nodeConfig?.label || 'Node',
+        value: cf.value,
+        sourcePath: cf.sourcePath,
       });
     }
   }
@@ -121,22 +126,44 @@ export default function VariablePicker({ allNodes, savedVariables, onInsert }: V
                 </div>
                 {filteredCustom.map((v, i) => {
                   const colors = FIELD_TYPE_COLORS[v.type] || FIELD_TYPE_COLORS.text;
+                  const hasValue = v.value !== undefined && v.value !== '' && v.value !== null;
+                  const valueStr = hasValue
+                    ? (typeof v.value === 'object' ? JSON.stringify(v.value) : String(v.value))
+                    : '';
+                  const valuePreview = valueStr.length > 28 ? valueStr.slice(0, 28) + '…' : valueStr;
                   return (
                     <button
                       key={`cf-${i}`}
                       onClick={() => handleInsert(v.key)}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 text-left transition-colors"
+                      className="w-full flex items-start gap-2 px-3 py-1.5 hover:bg-gray-50 text-left transition-colors"
                     >
                       <span
-                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        className="w-2 h-2 rounded-full flex-shrink-0 mt-0.5"
                         style={{ background: colors.dot }}
                       />
                       <div className="flex-1 min-w-0">
-                        <span className="text-[11px] font-mono font-semibold text-gray-800">{`{${v.key}}`}</span>
-                        <span className="text-[9px] text-gray-400 ml-1 truncate">· {v.nodeName}</span>
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span className="text-[11px] font-mono font-semibold text-gray-800">{`{${v.key}}`}</span>
+                          <span className="text-[9px] text-gray-400 truncate">· {v.nodeName}</span>
+                        </div>
+                        {hasValue && (
+                          <div className="mt-0.5 flex items-center gap-1">
+                            <span
+                              className="text-[9px] font-mono truncate"
+                              style={{ color: colors.text }}
+                            >
+                              {valuePreview}
+                            </span>
+                            {v.sourcePath && (
+                              <span className="text-[7px] text-green-600 bg-green-50 border border-green-200 px-1 py-0.5 rounded-full flex-shrink-0 font-semibold whitespace-nowrap">
+                                from test
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <span
-                        className="text-[8px] px-1 py-0.5 rounded font-semibold flex-shrink-0"
+                        className="text-[8px] px-1 py-0.5 rounded font-semibold flex-shrink-0 mt-0.5"
                         style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}` }}
                       >
                         {v.type}

@@ -65,8 +65,6 @@ export default function PropertiesPanel({
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [mockInput, setMockInput] = useState('{}');
-  const [savingKey, setSavingKey] = useState('');
-  const [savedKey, setSavedKey] = useState('');
   const [copiedOutput, setCopiedOutput] = useState(false);
 
   // ── All hooks must be declared before any conditional returns ──────────────
@@ -272,23 +270,6 @@ export default function PropertiesPanel({
     } finally {
       setTestRunning(false);
     }
-  };
-
-  const handleSaveVariable = () => {
-    if (!savingKey.trim() || !testState?.outputData) return;
-    const sv: SavedVariable = {
-      id: `sv-${Date.now()}`,
-      key: savingKey.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, ''),
-      label: savingKey.trim(),
-      type: 'json',
-      value: testState.outputData,
-      nodeId: selectedNode.id,
-      nodeName: selectedNode.data.label || nodeConfig.label,
-    };
-    onSaveVariable(sv);
-    setSavedKey(sv.key);
-    setSavingKey('');
-    setTimeout(() => setSavedKey(''), 2500);
   };
 
   const copyOutput = () => {
@@ -623,25 +604,30 @@ export default function PropertiesPanel({
                     <InteractiveOutputViewer
                       data={testState.outputData}
                       customFields={customFields}
-                      onSaveToField={(fieldId, value, type) => {
+                      onSaveToField={(fieldId, value, type, sourcePath) => {
                         onUpdateNode(selectedNode.id, {
                           customFields: customFields.map(cf =>
                             cf.id === fieldId
-                              ? { ...cf, value: value as string | number | boolean, type }
+                              ? { ...cf, value: value as string | number | boolean, type, sourcePath }
                               : cf
                           ),
                         });
+                        // Switch to config tab so user can see the updated field
+                        setActiveTab('config');
+                        setCustomOpen(true);
                       }}
-                      onCreateField={(key, value, type) => {
+                      onCreateField={(key, value, type, sourcePath) => {
                         const newCf: CustomField = {
                           id: `cf-${Date.now()}`,
                           key: key || `output_${Date.now()}`,
                           label: key,
                           type,
                           value: value as string | number | boolean,
+                          sourcePath,
                         };
                         onUpdateNode(selectedNode.id, { customFields: [...customFields, newCf] });
-                        setCustomOpen(true);
+                        // Switch to config tab so user can see the new field
+                        setTimeout(() => { setActiveTab('config'); setCustomOpen(true); }, 900);
                       }}
                     />
                   </div>
@@ -794,7 +780,7 @@ function FieldRow({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Custom field editor row — color-coded by type
+//  Custom field editor row — color-coded by type, shows saved value + source
 // ─────────────────────────────────────────────────────────────────────────────
 function CustomFieldEditor({
   field,
@@ -805,123 +791,153 @@ function CustomFieldEditor({
   onChange: (upd: Partial<CustomField>) => void;
   onRemove: () => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
   const colors = FIELD_TYPE_COLORS[field.type] || FIELD_TYPE_COLORS.text;
   const inputBase = 'text-[10px] bg-gray-50 border border-gray-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-orange-300 w-full transition-colors';
   const TYPE_OPTIONS: CustomField['type'][] = ['text', 'number', 'boolean', 'json', 'regex', 'textarea', 'select'];
 
+  const hasValue = field.value !== undefined && field.value !== '' && field.value !== null;
+  const valueStr = field.value == null ? '' : (typeof field.value === 'object'
+    ? JSON.stringify(field.value)
+    : String(field.value));
+  const previewStr = valueStr.length > 60 ? valueStr.slice(0, 60) + '…' : valueStr;
+  const isFromTest = Boolean(field.sourcePath);
+
   return (
     <div
-      className="rounded-xl p-2.5 space-y-2"
-      style={{ background: colors.bg, border: `1.5px solid ${colors.border}` }}
+      className="rounded-xl overflow-hidden"
+      style={{ border: `1.5px solid ${colors.border}` }}
     >
-      {/* Type dot + key + type select + remove */}
-      <div className="flex items-center gap-1.5">
+      {/* ── Compact header row — always visible ─────────────────────── */}
+      <div
+        className="flex items-center gap-1.5 px-2.5 py-2 cursor-pointer"
+        style={{ background: colors.bg }}
+        onClick={() => setExpanded(v => !v)}
+      >
+        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: colors.dot }} />
+
+        {/* key + use reference */}
+        <span className="text-[10px] font-mono font-bold text-gray-700 flex-1 truncate">{`{${field.key}}`}</span>
+
+        {/* value preview — prominent */}
+        {hasValue ? (
+          <span
+            className="text-[9px] font-mono font-semibold truncate max-w-[90px]"
+            style={{ color: colors.text }}
+            title={valueStr}
+          >
+            {previewStr}
+          </span>
+        ) : (
+          <span className="text-[9px] text-gray-300 italic">no value</span>
+        )}
+
+        {/* source badge — only when saved from test output */}
+        {isFromTest && (
+          <span className="flex-shrink-0 text-[8px] font-bold text-green-700 bg-green-50 border border-green-200 px-1 py-0.5 rounded-full whitespace-nowrap">
+            from test
+          </span>
+        )}
+
+        {/* type chip */}
         <span
-          className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-          style={{ background: colors.dot }}
-          title={`Type: ${field.type}`}
-        />
-        <input
-          className={`${inputBase} font-mono flex-1`}
-          style={{ background: 'white' }}
-          value={field.key}
-          onChange={e => onChange({ key: e.target.value.replace(/\s/g, '_').replace(/[^a-zA-Z0-9_]/g, '') })}
-          placeholder="variable_name"
-          spellCheck={false}
-        />
-        <select
-          className="text-[9px] bg-white border rounded px-1 py-1 focus:outline-none flex-shrink-0"
-          style={{ borderColor: colors.border, color: colors.text, fontWeight: 600 }}
-          value={field.type}
-          onChange={e => onChange({ type: e.target.value as CustomField['type'] })}
-        >
-          {TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
-        </select>
-        <button onClick={onRemove} className="text-red-400 hover:text-red-600 p-0.5 rounded hover:bg-red-50 transition-colors flex-shrink-0">
-          <Trash2 size={11} />
-        </button>
-      </div>
-
-      {/* Label */}
-      <input
-        className={inputBase}
-        style={{ background: 'white' }}
-        value={field.label}
-        onChange={e => onChange({ label: e.target.value })}
-        placeholder="Display label"
-      />
-
-      {/* Value — rendered based on type */}
-      {field.type === 'boolean' ? (
-        <label className="flex items-center gap-2 cursor-pointer">
-          <div className="relative">
-            <input type="checkbox" className="sr-only" checked={Boolean(field.value)} onChange={e => onChange({ value: e.target.checked })} />
-            <div className={`w-8 h-4 rounded-full transition-colors ${Boolean(field.value) ? 'bg-amber-500' : 'bg-gray-200'}`} />
-            <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${Boolean(field.value) ? 'translate-x-4' : ''}`} />
-          </div>
-          <span className="text-[10px] text-gray-600 font-semibold">{Boolean(field.value) ? 'true' : 'false'}</span>
-        </label>
-      ) : field.type === 'number' ? (
-        <input type="number" className={inputBase} style={{ background: 'white' }} value={Number(field.value)} onChange={e => onChange({ value: Number(e.target.value) })} placeholder="0" />
-      ) : field.type === 'json' ? (
-        <textarea className={`${inputBase} font-mono min-h-[48px] resize-y`} style={{ background: 'white' }} value={String(field.value)} onChange={e => onChange({ value: e.target.value })} placeholder='{"key": "value"}' rows={2} spellCheck={false} />
-      ) : field.type === 'textarea' ? (
-        <textarea className={`${inputBase} min-h-[48px] resize-y`} style={{ background: 'white' }} value={String(field.value)} onChange={e => onChange({ value: e.target.value })} placeholder="Enter value..." rows={2} />
-      ) : field.type === 'select' ? (
-        <>
-          <input className={inputBase} style={{ background: 'white' }} value={field.options || ''} onChange={e => onChange({ options: e.target.value })} placeholder="Option A, Option B, Option C" />
-          <p className="text-[8px]" style={{ color: colors.text }}>Comma-separated options</p>
-        </>
-      ) : (
-        <input
-          className={`${inputBase} ${field.type === 'regex' ? 'font-mono' : ''}`}
-          style={{ background: 'white' }}
-          value={String(field.value)}
-          onChange={e => onChange({ value: e.target.value })}
-          placeholder={field.type === 'regex' ? '\\d+' : 'Enter value...'}
-          spellCheck={false}
-        />
-      )}
-
-      {/* Type badge */}
-      <div className="flex items-center justify-between">
-        <span
-          className="text-[8px] font-bold px-1.5 py-0.5 rounded-full"
+          className="flex-shrink-0 text-[8px] font-semibold px-1.5 py-0.5 rounded-full"
           style={{ background: colors.border, color: colors.text }}
         >
           {field.type}
         </span>
-        <span className="text-[8px] font-mono text-gray-400">{`{${field.key}}`}</span>
+
+        {/* expand/remove */}
+        {expanded ? <ChevronDown size={10} className="text-gray-400 flex-shrink-0" /> : <ChevronRight size={10} className="text-gray-400 flex-shrink-0" />}
+        <button
+          onClick={e => { e.stopPropagation(); onRemove(); }}
+          className="text-red-400 hover:text-red-600 p-0.5 rounded hover:bg-red-50 transition-colors flex-shrink-0"
+        >
+          <Trash2 size={10} />
+        </button>
       </div>
+
+      {/* ── Source path banner — when saved from test output ────────── */}
+      {isFromTest && (
+        <div className="px-2.5 py-1 bg-green-50 border-t border-green-100 flex items-center gap-1.5 flex-wrap">
+          <span className="text-[8px] font-bold text-green-600 uppercase tracking-wide flex-shrink-0">Saved from</span>
+          <code className="text-[8px] font-mono text-green-700 bg-white border border-green-200 px-1.5 py-0.5 rounded truncate max-w-full">
+            {field.sourcePath}
+          </code>
+        </div>
+      )}
+
+      {/* ── Current value display — always show if has value ────────── */}
+      {hasValue && !expanded && (
+        <div className="px-2.5 py-1.5 bg-white border-t border-gray-100">
+          <span className="text-[8px] text-gray-400 font-bold uppercase block mb-0.5">Current value</span>
+          <span className="text-[9px] font-mono text-gray-700 break-all leading-relaxed">{valueStr}</span>
+        </div>
+      )}
+
+      {/* ── Editable section (expanded) ─────────────────────────────── */}
+      {expanded && (
+        <div className="px-2.5 pt-2 pb-2.5 space-y-2 bg-white border-t border-gray-100">
+          {/* key + type row */}
+          <div className="flex items-center gap-1.5">
+            <input
+              className={`${inputBase} font-mono flex-1`}
+              value={field.key}
+              onChange={e => onChange({ key: e.target.value.replace(/\s/g, '_').replace(/[^a-zA-Z0-9_]/g, '') })}
+              placeholder="variable_name"
+              spellCheck={false}
+            />
+            <select
+              className="text-[9px] bg-white border rounded px-1 py-1 focus:outline-none flex-shrink-0"
+              style={{ borderColor: colors.border, color: colors.text, fontWeight: 600 }}
+              value={field.type}
+              onChange={e => onChange({ type: e.target.value as CustomField['type'] })}
+            >
+              {TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+
+          {/* Label */}
+          <input
+            className={inputBase}
+            value={field.label}
+            onChange={e => onChange({ label: e.target.value })}
+            placeholder="Display label"
+          />
+
+          {/* Value — rendered based on type */}
+          {field.type === 'boolean' ? (
+            <label className="flex items-center gap-2 cursor-pointer">
+              <div className="relative">
+                <input type="checkbox" className="sr-only" checked={Boolean(field.value)} onChange={e => onChange({ value: e.target.checked })} />
+                <div className={`w-8 h-4 rounded-full transition-colors ${Boolean(field.value) ? 'bg-amber-500' : 'bg-gray-200'}`} />
+                <div className={`absolute top-0.5 left-0.5 w-3 h-3 bg-white rounded-full shadow transition-transform ${Boolean(field.value) ? 'translate-x-4' : ''}`} />
+              </div>
+              <span className="text-[10px] text-gray-600 font-semibold">{Boolean(field.value) ? 'true' : 'false'}</span>
+            </label>
+          ) : field.type === 'number' ? (
+            <input type="number" className={inputBase} value={Number(field.value)} onChange={e => onChange({ value: Number(e.target.value) })} placeholder="0" />
+          ) : field.type === 'json' ? (
+            <textarea className={`${inputBase} font-mono min-h-[48px] resize-y`} value={String(field.value)} onChange={e => onChange({ value: e.target.value })} placeholder='{"key": "value"}' rows={2} spellCheck={false} />
+          ) : field.type === 'textarea' ? (
+            <textarea className={`${inputBase} min-h-[48px] resize-y`} value={String(field.value)} onChange={e => onChange({ value: e.target.value })} placeholder="Enter value..." rows={2} />
+          ) : field.type === 'select' ? (
+            <>
+              <input className={inputBase} value={field.options || ''} onChange={e => onChange({ options: e.target.value })} placeholder="Option A, Option B, Option C" />
+              <p className="text-[8px]" style={{ color: colors.text }}>Comma-separated options</p>
+            </>
+          ) : (
+            <input
+              className={`${inputBase} ${field.type === 'regex' ? 'font-mono' : ''}`}
+              value={String(field.value)}
+              onChange={e => onChange({ value: e.target.value })}
+              placeholder={field.type === 'regex' ? '\\d+' : 'Enter value...'}
+              spellCheck={false}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Pretty output viewer
-// ─────────────────────────────────────────────────────────────────────────────
-function OutputViewer({ data }: { data: unknown }) {
-  if (typeof data === 'string') {
-    return (
-      <pre className="text-[10px] text-gray-700 whitespace-pre-wrap font-mono leading-relaxed">
-        {data}
-      </pre>
-    );
-  }
-
-  const json = JSON.stringify(data, null, 2);
-  // Syntax-highlight keys, strings, numbers, booleans
-  const highlighted = json
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"([^"]+)":/g, '<span style="color:#6366f1;font-weight:600">"$1"</span>:')
-    .replace(/: "([^"]*)"/g, ': <span style="color:#059669">"$1"</span>')
-    .replace(/: (true|false)/g, ': <span style="color:#d97706;font-weight:600">$1</span>')
-    .replace(/: (\d+\.?\d*)/g, ': <span style="color:#0ea5e9">$1</span>');
-
-  return (
-    <pre
-      className="text-[10px] font-mono leading-relaxed whitespace-pre-wrap"
-      dangerouslySetInnerHTML={{ __html: highlighted }}
-    />
-  );
-}

@@ -44,6 +44,10 @@ export interface CustomField {
   type: 'text' | 'number' | 'boolean' | 'json' | 'regex' | 'textarea' | 'select';
   value: string | number | boolean;
   options?: string;
+  /** JSONPath this value was extracted from, e.g. $.data.customer_id */
+  sourcePath?: string;
+  /** Node ID this value was extracted from */
+  sourceNodeId?: string;
 }
 
 export interface WorkflowNodeData extends Record<string, unknown> {
@@ -342,15 +346,19 @@ export const NODE_LIBRARY: NodeConfig[] = [
     ],
   },
   {
-    id: 'data-vlookup', type: 'data', label: 'VLOOKUP / Merge',
-    description: 'Join two datasets like Excel VLOOKUP',
+    id: 'data-vlookup', type: 'data', label: 'VLOOKUP',
+    description: 'Find a value in a table — works exactly like Excel VLOOKUP',
     iconName: 'Link', ...D,
     fields: [
-      { key: 'rightFile', label: 'Lookup File (right side)', type: 'text', placeholder: 'lookup_table.xlsx', defaultValue: 'lookup.xlsx' },
-      { key: 'leftKey', label: 'Left Key Column', type: 'text', defaultValue: 'ID' },
-      { key: 'rightKey', label: 'Right Key Column', type: 'text', defaultValue: 'ID' },
-      { key: 'how', label: 'Join Type', type: 'select', options: ['left', 'inner', 'right', 'outer', 'cross'], defaultValue: 'left' },
-      { key: 'suffix', label: 'Suffix for Duplicate Cols', type: 'text', defaultValue: '_lookup' },
+      { key: 'lookupValue',   label: 'Lookup Value',            type: 'text',   placeholder: '{customer_id}  or  "CUST001"', defaultValue: '',        hint: 'The value to search for. Supports {variables} from previous steps.' },
+      { key: 'lookupFile',    label: 'Table File',              type: 'text',   placeholder: 'customers.xlsx',               defaultValue: '',        hint: 'The .xlsx or .csv file that contains your lookup table.' },
+      { key: 'lookupSheet',   label: 'Sheet Name (xlsx only)',  type: 'text',   placeholder: 'Sheet1',                        defaultValue: 'Sheet1' },
+      { key: 'searchColumn',  label: 'Search In Column',        type: 'text',   placeholder: 'A  or  CustomerID',             defaultValue: 'A',       hint: 'Column to search in. Use a letter (A, B, C…) or the exact column header name.' },
+      { key: 'returnColumn',  label: 'Return Column',           type: 'text',   placeholder: 'C  or  CustomerName  or  3',   defaultValue: 'B',       hint: 'Column whose value to return. Letter, header name, or 1-based index (like Excel).' },
+      { key: 'matchType',     label: 'Match Type',              type: 'select', options: ['Exact (FALSE)', 'Approximate (TRUE)'], defaultValue: 'Exact (FALSE)' },
+      { key: 'ifNotFound',    label: 'If Not Found',            type: 'select', options: ['Return empty string', 'Return #N/A', 'Return 0', 'Raise error'], defaultValue: 'Return empty string' },
+      { key: 'applyToColumn', label: 'Apply to Whole Column (optional)', type: 'text', placeholder: 'leave blank for single lookup', defaultValue: '', hint: 'If set, applies the VLOOKUP to every row in this DataFrame column and adds a new result column.' },
+      { key: 'outputVar',     label: 'Output Variable / Column', type: 'text',  defaultValue: 'vlookup_result' },
     ],
   },
   {
