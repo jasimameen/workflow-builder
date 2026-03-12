@@ -74,13 +74,13 @@ app/
 ### 1) Install dependencies
 
 ```bash
-npm install
+pnpm install
 ```
 
 ### 2) Start development server
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 Open: [http://localhost:3030](http://localhost:3030)
@@ -88,23 +88,23 @@ Open: [http://localhost:3030](http://localhost:3030)
 ### 3) Build for production
 
 ```bash
-npm run build
-npm run start
+pnpm build
+pnpm start
 ```
 
 ---
 
 ## Scripts
 
-- `npm run dev` - start local dev server on port `3030`
-- `npm run build` - create production build
-- `npm run start` - run production server on port `3030`
-- `npm run lint` - run ESLint
+- `pnpm dev` - start local dev server on port `3030`
+- `pnpm build` - create production build
+- `pnpm start` - run production server on port `3030`
+- `pnpm lint` - run ESLint
 
 Type-check command:
 
 ```bash
-npx tsc --noEmit
+pnpm exec tsc --noEmit
 ```
 
 ---
@@ -120,6 +120,47 @@ The app keeps workflow state centrally in `WorkflowCanvas`:
 - `showCode` -> toggles canvas/code generation views
 
 The source of truth for node capabilities is `NODE_LIBRARY` in `app/lib/types.ts`.
+
+---
+
+## Product Flows
+
+### 1) Builder Flow (User Journey)
+
+```mermaid
+flowchart LR
+  A[Open Canvas] --> B[Drag Node from Library]
+  B --> C[Connect Nodes]
+  C --> D[Configure Fields]
+  D --> E[Test Node]
+  E --> F[Save Useful Variables]
+  F --> G[Generate Python / JS]
+```
+
+### 2) Node Test Execution Flow
+
+```mermaid
+flowchart TD
+  A[Click Test in PropertiesPanel] --> B{Node Type}
+  B -->|HTTP / External| C[/POST /api/run-http/]
+  B -->|AI Node| D[/POST /api/run-ai/]
+  B -->|Python / Code| E[/POST /api/run-python/]
+  C --> F[Update node.data.testState]
+  D --> F
+  E --> F
+  F --> G[Render status, logs, output]
+```
+
+### 3) Code Generation Flow
+
+```mermaid
+flowchart LR
+  A[Graph nodes + edges] --> B[CodePanel]
+  B --> C[codeGenerator.ts]
+  C --> D[Per-node switch/case generation]
+  D --> E[Python Output]
+  D --> F[JavaScript Output]
+```
 
 ---
 
@@ -190,7 +231,7 @@ Variable sources:
 
 - **Port already in use**: change the dev port or stop existing process
 - **Python tests failing**: ensure `python3` is installed and available in `PATH`
-- **Type errors**: run `npx tsc --noEmit` and resolve before build
+- **Type errors**: run `pnpm exec tsc --noEmit` and resolve before build
 - **Node behavior mismatch**: verify `NODE_LIBRARY` field keys align with generator/test logic
 
 ---
